@@ -18,10 +18,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
 import java.io.*;
-import java.nio.file.DirectoryStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.file.*;
 import java.security.GeneralSecurityException;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -45,8 +42,48 @@ public class FileEventServiceImpl implements FileEventListener {
         }
     }
 
+    public void localWatch() throws IOException, InterruptedException, GeneralSecurityException {
+        WatchService watchService
+                = FileSystems.getDefault().newWatchService();
+
+        Path path = Paths.get(System.getProperty("user.home")+"/fileEvent");
+
+        path.register(
+                watchService,
+                StandardWatchEventKinds.ENTRY_CREATE,
+                StandardWatchEventKinds.ENTRY_DELETE,
+                StandardWatchEventKinds.ENTRY_MODIFY);
+
+        WatchKey key;
+        if ((key = watchService.take()) != null) {
+            for (WatchEvent<?> event : key.pollEvents()) {
+                System.out.println(
+                        "Event kind:" + event.kind()
+                                + ". File affected: " + event.context() + ".");
+
+            }
+            key.reset();
+
+        }
+        List<File> filesList = new ArrayList<>();
+        File file = new File(System.getProperty("user.home")+"/fileEvent");
+        if(file.isDirectory()){
+            try(Stream<Path> stream = Files.walk(Paths.get(System.getProperty("user.home")+"/fileEvent"))){
+                filesList =  stream.filter(Files::isRegularFile).map(e->e.toFile()).collect(Collectors.toList());
+            }
+        }
+        filesList.add(file);
+        List<String> fileNames = filesList.stream().map(File::getName).collect(Collectors.toList());
+        driveConnect(fileNames);
+    }
+
     @Override
-    public void triggerPolling() throws JSchException, SftpException, IOException, GeneralSecurityException {
+    public void triggerPolling(String param) throws JSchException, SftpException, IOException, GeneralSecurityException, InterruptedException {
+        if(param.equalsIgnoreCase("local")){
+            localWatch();
+            return;
+        }
+
         List<File> fileListLocal = new ArrayList<>();
         JSch jsch = new JSch();
         FileUtils.forceMkdir(new File("src/main/resources/newState/"));
@@ -104,6 +141,10 @@ public class FileEventServiceImpl implements FileEventListener {
         FileUtils.forceMkdir(Paths.get("src/main/resources/previousState/").toFile());
         copyDirectory(newState, oldState);
         FileUtils.deleteDirectory(newState);
+        driveConnect(fileNames);
+    }
+
+    public void driveConnect(List<String> fileNames) throws GeneralSecurityException, IOException {
         final NetHttpTransport HTTP_TRANSPORT = GoogleNetHttpTransport.newTrustedTransport();
         Drive service = new Drive.Builder(HTTP_TRANSPORT, JSON_FACTORY, getCredentials())
                 .setApplicationName(APPLICATION_NAME)
@@ -128,6 +169,7 @@ public class FileEventServiceImpl implements FileEventListener {
             kafkaTemplate.send("fileEvent", "File Shared "+sharedFiled.get(0));
         }
     }
+
     @KafkaListener(topics = "fileEvent" ,groupId = "fileEvent")
     public void listenFileEvent(String message) {
         System.out.println("Received Message in group : " + message);
@@ -159,7 +201,7 @@ public class FileEventServiceImpl implements FileEventListener {
     }
     private static Credential getCredentials()  {
         //returns an authorized Credential object.
-        return new GoogleCredential().setAccessToken("ya29.A0ARrdaM8ufZXOX3IUGOi0kuA6GGLTYWzTYxz2DrRTH-mPBixRwEf0wok9R5tQvRiVgxWN91jrrkP0wLavcQ7fgzzw-6OesEdH3eN_ZShPbckOlqv_Aa-Vk_bdMTf76wb8Ns4F7WoMksn_BSJdhHg80vVH-ressw");
+        return new GoogleCredential().setAccessToken("ya29.A0ARrdaM_vfJSPDSHsjCjKqN1Y6D2hXZNR0DnbI9WMpzk0lJEg0zTwM9NMNulm3A_nsoGNVVeySxFLka1iZRWDSLxlWvPfzF3K-gOmo7pWDXc70P4ADA2KOXGJ2p-8SxJ5iJDw8KjZEV5YJ5xkdj1Oc6stUyeBGQ");
     }
 
     private void copyFile(File source, File target) throws IOException {

@@ -8,7 +8,7 @@ import java.security.GeneralSecurityException;
 
 public interface FileEventListener {
 
-    void triggerPolling() throws JSchException, SftpException, IOException, GeneralSecurityException;
+    void triggerPolling(String param) throws JSchException, SftpException, IOException, GeneralSecurityException, InterruptedException;
 
 
 }
